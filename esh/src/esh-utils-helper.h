@@ -12,6 +12,8 @@
 #include <dlfcn.h>
 #include <limits.h>
 
+const char *
+print_job_status(enum job_status status);
 
 bool
 is_esh_command_built_in(char * command, struct esh_pipeline *pipe, struct esh_command_line *cmdline);//, struct list * p_jobs_list, int * p_job_id);
