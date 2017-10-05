@@ -1,9 +1,0 @@
-{
-   suppress_bogus_warning_in_readline
-   Memcheck:Param
-   sendmsg(msg.msg_name)
-   fun:__sendmsg_nocancel
-   fun:readline
-   fun:main
-}
-

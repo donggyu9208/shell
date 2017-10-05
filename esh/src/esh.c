@@ -82,9 +82,12 @@ struct esh_shell shell =
  * same terminal state (obtained on startup via
  * esh_sys_tty_init()).
  */
-void
+static void
 give_terminal_to(pid_t pgid, struct termios *pg_tty_state)
 {
+    #ifdef DEBUG
+        printf("/nIn give_terminal_to\n");
+    #endif
     esh_signal_block(SIGTTOU);
     int rc = tcsetpgrp(esh_sys_tty_getfd(), pgid);
     if (rc == -1)
@@ -93,6 +96,9 @@ give_terminal_to(pid_t pgid, struct termios *pg_tty_state)
     if (pg_tty_state)
         esh_sys_tty_restore(pg_tty_state);
     esh_signal_unblock(SIGTTOU);
+    #ifdef DEBUG
+        printf("/nDone give_terminal_to\n");
+    #endif
 }
 
 int
@@ -102,11 +108,11 @@ main(int ac, char *av[])
     list_init(&esh_plugin_list);
     
     // Job List
-    job_id = 1;
+    job_id = 0;
     list_init(&jobs_list);
     
-    struct list *p_jobs_list = &jobs_list;
-    int * p_job_id = &job_id;
+    //struct list *p_jobs_list = &jobs_list;
+    //int * p_job_id = &job_id;
     
     /* Process command-line arguments. See getopt(3) */
     while ((opt = getopt(ac, av, "hp:")) > 0) {
@@ -122,16 +128,10 @@ main(int ac, char *av[])
     }
 
     esh_plugin_initialize(&shell);
-    
-    //  int setpgid(pid_t pid, pid_t pgid):
-    //      sets PGID of the process specified by pid to pgid
-    //      setpgrp() == setpgid(0, 0);
-    // setpgrp();  
-    pid_t shell_pgid = getpid();                    
-    
+    setpgrp();                              // set current pid to pgid
+    shell_pid = getpid();                    
     terminal = esh_sys_tty_init();
-    
-    give_terminal_to(shell_pgid, terminal);
+    give_terminal_to(shell_pid, terminal);
     
     /* Read/eval loop. */
     for (;;) {
@@ -156,7 +156,7 @@ main(int ac, char *av[])
         
                                                   // parsed command line passed to print out its command
         //esh_command_line_print(cline);
-        esh_command_line_helper(cline, p_jobs_list, p_job_id);//, terminal);
+        esh_command_line_helper(cline);
         esh_command_line_free(cline);
         
         

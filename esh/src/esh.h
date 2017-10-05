@@ -212,16 +212,6 @@ int job_id;
 
 struct termios * terminal;
 
-/**
- * Assign ownership of the terminal to process group
- * pgid, restoring its terminal state if provided.
- *
- * Before printing a new prompt, the shell should
- * invoke this function with its own process group
- * id (obtained on startup via getpgrp()) and a
- * same terminal state (obtained on startup via
- * esh_sys_tty_init()).
- */
-void give_terminal_to(pid_t pgid, struct termios *pg_tty_state);
+pid_t shell_pid;
 
 #endif //__ESH_H
