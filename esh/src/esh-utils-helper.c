@@ -31,7 +31,8 @@ static const char rcsid [] = "$Id: esh-utils.c,v 1.5 2011/03/29 15:46:28 cs3214 
 #pragma clang diagnostic pop
 #endif
 
-#define DEBUG 1
+//#define DEBUG 0
+#define DEBUG_JOBS
 
 /**
  * Assign ownership of the terminal to process group
@@ -64,6 +65,13 @@ give_terminal_to(pid_t pgid, struct termios *pg_tty_state)
     #endif
 }
 
+/*
+ *
+ */
+// static void
+// print_job(struct esh_pipeline * pipe) {
+// }
+
 /* 
  *
  */
@@ -94,8 +102,8 @@ child_status_change(pid_t child_pid, int status) {
                     printf("[%d]+   Stopped\n", pipe -> jid);
                     pipe -> status = STOPPED;
                     // Save current terminal settings. This function is used when a job is suspended.
-                    //esh_sys_tty_save(&pipe -> saved_tty_state);
-                    //give_terminal_to(getpgrp(), terminal);
+                    esh_sys_tty_save(&pipe -> saved_tty_state);
+                    give_terminal_to(getpgrp(), terminal);
                 }
                 else if (WIFSIGNALED(status)) {
                     #ifdef DEUG
@@ -120,6 +128,12 @@ child_status_change(pid_t child_pid, int status) {
                     #endif
                     list_remove(list_elem_commands);
                 }
+                else if (WIFCONTINUED(status)) {
+                    #ifdef DEUG
+                        printf("Signal: Child is continued\n");
+                    #endif
+                }
+                
             }
             
             if (list_empty(&pipe -> commands)) {
@@ -203,7 +217,7 @@ wait_for_job(struct esh_pipeline * pipeline)
 }
 
 bool
-is_esh_command_built_in(char * command, struct esh_pipeline * pipe) {//, struct list * p_jobs_list, int * p_job_id) {
+is_esh_command_built_in(char * command, struct esh_pipeline * pipe, struct esh_command_line *cmdline) {//, struct list * p_jobs_list, int * p_job_id) {
     char * built_in[] = {"jobs", "fg", "bg", "kill", "stop", "exit", NULL};
     int i = 0;
     char * cmd = NULL;
@@ -221,27 +235,37 @@ is_esh_command_built_in(char * command, struct esh_pipeline * pipe) {//, struct 
         is_built_in = false;
     }
     else if (strcmp(cmd, "jobs") == 0) {
-        #ifdef DEBUG
-             printf("Jobs:\n");
+        #ifdef DEBUG_JOBS
+             printf("In Jobs\n");
         #endif
         
+        // char * jobs_status[] = {"Running", "Stopped"};
+        
         struct list_elem * e;
-        struct esh_pipeline * job_pipe;
         for (e = list_begin (&jobs_list); e != list_end (&jobs_list); e = list_next (e)) {
-            job_pipe = list_entry(e, struct esh_pipeline, elem);
-            
-            if (job_pipe != NULL) {
-                #ifdef DEBUG
+            struct list_elem * e = list_begin (&jobs_list);
+            struct esh_pipeline * jobs = list_entry(e, struct esh_pipeline, elem);
+            if (jobs != NULL) {
+                #ifdef DEBUG_JOBS
                     printf("Jobs running\n");
                 #endif
-                printf("[%d]\n", job_pipe -> jid);
+                printf("[%d]\n", jobs -> jid);
             }
             else {
-                #ifdef DEBUG
+                #ifdef DEBUG_JOBS
                     printf("No Jobs running\n");
                 #endif
             }
         }
+        
+        list_pop_front(&cmdline -> pipes);
+        //list_push_back(&jobs_list, elem);
+        #ifdef DEBUG_JOBS
+            printf("Done Jobs\n");
+        #endif
+    }
+    else if (strcmp(cmd, "fg") == 0) {
+    
     }
     else if (strcmp(cmd, "bg") == 0) {
         pipe -> status = BACKGROUND;
@@ -285,18 +309,10 @@ esh_command_helper(struct esh_command * cmd, struct esh_pipeline * pipe)
     }
     
     // --------- Foreground and Background -------- //
-    if (pipe -> bg_job) {
-        #ifdef DEBUG
-            printf("Pipeline status: BACKGROUND\n");
-        #endif
-        
+    if (pipe -> bg_job) {        
         pipe -> status = BACKGROUND;
     }
-    else {
-        #ifdef DEBUG
-            printf("Pipeline status: FOREGROUND\n");
-        #endif
-        
+    else {        
         pipe -> status = FOREGROUND;
         give_terminal_to(pipe -> pgid, terminal);
     }
@@ -312,8 +328,9 @@ esh_command_helper(struct esh_command * cmd, struct esh_pipeline * pipe)
     }
     
     // ------------- Execute Command ------------ //
-    char **p = cmd->argv;
+    
     #ifdef DEBUG
+        char **p = cmd->argv;
         printf("\tCommand:");
             while (*p)
                 printf(" %s", *p++);
@@ -344,9 +361,6 @@ esh_pipeline_helper(struct esh_pipeline * pipe, struct esh_command_line * cmdlin
     /* -------------------------- */
     
     /* -------- Execvp ---------- */
-    #ifdef DEBUG
-        printf("\n\tIn Not Plug-Ins\n");
-    #endif
     
     esh_signal_sethandler(SIGCHLD, sigchld_handler);
     
@@ -360,24 +374,18 @@ esh_pipeline_helper(struct esh_pipeline * pipe, struct esh_command_line * cmdlin
     pipe -> jid = job_id;
     pipe -> pgid = -1;
     pid_t pid;
-    
-    #ifdef DEBUG
-        printf("\tJob ID is %d\n", pipe -> jid);
-        int process_i = 1;  
-    #endif
 
     struct list_elem * e;
     for (e = list_begin (&pipe->commands); e != list_end (&pipe->commands); e = list_next (e)) {
         #ifdef DEBUG
-            printf("\t\tIn command loop\n");
-            printf("\t\tprocess %d. \n", process_i++);
+            printf("\t\tIn command loop\n");    
         #endif
         
         struct esh_command * cmd = list_entry(e, struct esh_command, elem);
         char * command = cmd -> argv[0];
    
         // Iterates through the command separated by "|"
-        if (!is_esh_command_built_in(command, pipe)) {
+        if (!is_esh_command_built_in(command, pipe, cmdline)) {
             // Block Child Process Signal to prevent race running condition
             esh_signal_block(SIGCHLD);
             
@@ -392,8 +400,7 @@ esh_pipeline_helper(struct esh_pipeline * pipe, struct esh_command_line * cmdlin
             }
             else {
                 #ifdef DEBUG
-                    printf("\n\t\tFork: In the Parent Process\n");
-                    printf("\t\tpid: %d\n", getpid());
+                    printf("\n\t\t\tFork: \nIn the Parent Process\n");
                 #endif
                 
                 // In the Parent Process
@@ -409,30 +416,30 @@ esh_pipeline_helper(struct esh_pipeline * pipe, struct esh_command_line * cmdlin
                 // }
                                 
                 #ifdef DEBUG
-                    printf("\t\tEnd of Parent Process\n");
+                    printf("\t\t\tEnd of Parent Process\n");
                 #endif
             }
             // Out of Parent
-                
-        }
-        // Out of pipeline loop
-
-        if (pipe -> bg_job) {
-            pipe -> status = BACKGROUND;
-            printf("[%d] %d\n", pipe -> jid, pipe ->pgid);
-        }
-        
-        if (!list_empty(&cmdline -> pipes)) {
+            if (pipe -> bg_job) {
+                pipe -> status = BACKGROUND;
+                printf("[%d] %d\n", pipe -> jid, pipe ->pgid);
+            }
+            
             struct list_elem * elem = list_pop_front(&cmdline -> pipes);
             list_push_back(&jobs_list, elem);
+            
+            
+            if (!pipe -> bg_job) {
+                wait_for_job(pipe);
+            }
+            give_terminal_to(shell_pid, terminal);
+            esh_signal_unblock(SIGCHLD);
         }
         
         
-        if (!pipe -> bg_job) {
-            wait_for_job(pipe);
-        }
-        give_terminal_to(shell_pid, terminal);
-        esh_signal_unblock(SIGCHLD);
+        #ifdef DEBUG
+            printf("\t\tDone command loop\n");    
+        #endif
     }
     #ifdef DEBUG
         printf("\nDone esh_pipeline_helper\n\n");
@@ -443,17 +450,14 @@ esh_pipeline_helper(struct esh_pipeline * pipe, struct esh_command_line * cmdlin
 /* Print esh_command_line structure to stdout */
 void 
 esh_command_line_helper(struct esh_command_line * cmdline)
-{    
-    #ifdef DEBUG
-        printf("Command line\n");
-    #endif
-    
+{        
     //struct list_elem * e; 
     //for (e = list_begin (&cmdline -> pipes); e != list_end (&cmdline -> pipes); e = list_next (e)) {
+    while (!list_empty(&cmdline->pipes)) {
         struct esh_pipeline * pipe = list_entry(list_begin(&cmdline -> pipes), struct esh_pipeline, elem);
 
-        printf(" ------------- \n");
+        printf(" ---------------------------------------- \n");
         esh_pipeline_helper(pipe, cmdline);
-    //}
+    }
     printf("==========================================\n");
 }

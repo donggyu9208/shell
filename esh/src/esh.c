@@ -14,7 +14,7 @@
 #include "esh-utils-helper.h"
 #include "esh-sys-utils.h"
 
-#define DEBUG 1
+//#define DEBUG 1
 static void
 usage(char *progname)
 {
@@ -86,7 +86,7 @@ static void
 give_terminal_to(pid_t pgid, struct termios *pg_tty_state)
 {
     #ifdef DEBUG
-        printf("/nIn give_terminal_to\n");
+        printf("\nIn give_terminal_to\n");
     #endif
     esh_signal_block(SIGTTOU);
     int rc = tcsetpgrp(esh_sys_tty_getfd(), pgid);
@@ -97,7 +97,7 @@ give_terminal_to(pid_t pgid, struct termios *pg_tty_state)
         esh_sys_tty_restore(pg_tty_state);
     esh_signal_unblock(SIGTTOU);
     #ifdef DEBUG
-        printf("/nDone give_terminal_to\n");
+        printf("\nDone give_terminal_to\n");
     #endif
 }
 

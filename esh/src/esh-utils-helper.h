@@ -14,13 +14,13 @@
 
 
 bool
-is_esh_command_built_in(char * command, struct esh_pipeline *pipe);//, struct list * p_jobs_list, int * p_job_id);
+is_esh_command_built_in(char * command, struct esh_pipeline *pipe, struct esh_command_line *cmdline);//, struct list * p_jobs_list, int * p_job_id);
 
 void
 esh_command_helper(struct esh_command *cmd, struct esh_pipeline *pipe);//, struct termios * terminal);
 
 void
-esh_pipeline_helper(struct esh_pipeline *pipe,struct esh_command_line * cmdline);//, struct list * p_jobs_list, int * p_job_id, pid_t shell_pid);//, struct termios * terminal);
+esh_pipeline_helper(struct esh_pipeline *pipe, struct esh_command_line * cmdline);//, struct list * p_jobs_list, int * p_job_id, pid_t shell_pid);//, struct termios * terminal);
 
 void 
 esh_command_line_helper(struct esh_command_line *cmdline);//, struct list * p_jobs_list, int * p_job_id, pid_t shell_pid); //, struct termios * terminal);
