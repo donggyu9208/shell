@@ -132,48 +132,35 @@ child_status_change(pid_t child_pid, int status) {
             
             struct esh_command * command = list_entry(list_elem_commands, struct esh_command, elem);
             if (command -> pid == child_pid) {
+                 // Stopped by Ctrl + Z
                 if (WIFSTOPPED(status)) {
-                    #ifdef DEBUG
+                    #ifdef DEBUG_SIGNAL
                         printf("Signal: Child Process is Stopped\n");
                     #endif
-                    
+                    pipe -> status = STOPPED;
                     printf("\n[%d]+\tStopped\t\t\t", pipe -> jid);
                     print_job(pipe);
-                    pipe -> status = STOPPED;
-                    // Save current terminal settings. This function is used when a job is suspended.
-                    //esh_sys_tty_save(&pipe -> saved_tty_state);
-                    //give_terminal_to(getpgrp(), terminal);
                 }
-                else if (WIFSIGNALED(status)) {
-                    #ifdef DEUG
-                        printf("Signal: Child Processed is Terminated by a signal\n");
-                        printf("Number of signals that caused child process to terminate are %d\n", WTERMSIG(status));
+                // KILLED by kill command [TERMINATED]
+                else if (WTERMSIG(status)) {
+                    #ifdef DEBUG_SIGNAL
+                        printf("Signal: Processed is interrupted and is terminated\n");
                     #endif
-                    if (WTERMSIG(status) == 22) {
-                        printf("[%d]+\tStopped\t\t\t", pipe->jid);
-                        print_job(pipe);
-                        pipe -> status = STOPPED;
-                        //esh_sys_tty_save(&pipe -> saved_tty_state);
-                        //give_terminal_to(getpgrp(), terminal);
-                    }
-                    else {
+                    pipe -> status = TERMINATED;
+                    if (!pipe -> bg_job) {
                         list_remove(list_elem_commands);
-                        //give_terminal_to(getpgrp(), terminal);
                     }
-                    
                 }
+                // Exited normally [DONE]
                 else if (WIFEXITED(status)) {
-                    #ifdef DEUG
-                        printf("Signal: Child is terminated normally\n");
+                    #ifdef DEBUG_SIGNAL
+                        printf("Signal: Process is terminated normally\n");
                     #endif
-                    list_remove(list_elem_commands);
-                }
-                else if (WIFCONTINUED(status)) {
-                    #ifdef DEUG
-                        printf("Signal: Child is continued\n");
-                    #endif
-                }
-                
+                    pipe -> status = DONE;
+                    if (!pipe -> bg_job) {
+                        list_remove(list_elem_commands);
+                    }
+                }                
             }
             
             if (list_empty(&pipe -> commands)) {
@@ -256,7 +243,47 @@ wait_for_job(struct esh_pipeline * pipeline)
     #endif
 }
 
-bool
+static void esh_command_jobs(struct esh_command_line * cmdline) {   
+    struct list_elem * e;
+    for (e = list_begin (&jobs_list); e != list_end (&jobs_list); e = list_next (e)) {
+        struct esh_pipeline * job = list_entry(e, struct esh_pipeline, elem);
+        if (job != NULL) {
+            #ifdef DEBUG_JOBS
+                printf("Jobs running\n");
+            #endif
+            
+            // The most recent job is denoted as [job_id]+
+            // The second most recent job is denoted as [job_id]- 
+            // Rest jobs are denoted without any +/- symbols [job_id]
+            if (list_next(e) == list_end (&jobs_list)) {
+                printf("[%d]+\t%s\t\t\t", job -> jid, print_job_status(job -> status));
+            }
+            else if (list_next(list_next(e)) == list_end(&jobs_list)) {
+                printf("[%d]-\t%s\t\t\t", job -> jid, print_job_status(job -> status));
+            }
+            else {
+                printf("[%d]\t%s\t\t\t", job -> jid, print_job_status(job -> status));
+            }
+            
+            // Prints the name of the job
+            print_job(job);
+            
+            // When job status is DONE || TERMINATED, remove from jobs list after displaying "Done"
+            if (job -> status == DONE || job -> status == TERMINATED) {
+                list_remove(e);
+            }
+        }
+        else {
+            #ifdef DEBUG_JOBS
+                printf("No Jobs running\n");
+            #endif
+        }
+    }
+    // remove jobs command from pipeline
+    list_pop_front(&cmdline -> pipes);      
+}
+
+static bool
 is_esh_command_built_in(char * command, struct esh_pipeline * pipe, struct esh_command_line *cmdline) {//, struct list * p_jobs_list, int * p_job_id) {
     char * built_in[] = {"jobs", "fg", "bg", "kill", "stop", "exit", NULL};
     int i = 0;
@@ -272,51 +299,35 @@ is_esh_command_built_in(char * command, struct esh_pipeline * pipe, struct esh_c
     }
     
     if (cmd == NULL) {
-        is_built_in = false;
+        return false;
     }
     else if (strcmp(cmd, "jobs") == 0) {
-        #ifdef DEBUG_JOBS
-             printf("In Jobs\n");
-        #endif
         
-        struct list_elem * e;
-        for (e = list_begin (&jobs_list); e != list_end (&jobs_list); e = list_next (e)) {
-            struct esh_pipeline * job = list_entry(e, struct esh_pipeline, elem);
-            if (job != NULL) {
-                #ifdef DEBUG_JOBS
-                    printf("Jobs running\n");
-                #endif
-                printf("[%d]\t%s\t\t\t", job -> jid, print_job_status(job -> status));
-                print_job(job);
-            }
-            else {
-                #ifdef DEBUG_JOBS
-                    printf("No Jobs running\n");
-                #endif
-            }
-        }
         
-        list_pop_front(&cmdline -> pipes);
-        //list_push_back(&jobs_list, elem);
-        #ifdef DEBUG_JOBS
-            printf("Done Jobs\n");
-        #endif
+        esh_command_jobs(cmdline);
     }
     else if (strcmp(cmd, "fg") == 0) {
-    
+        list_pop_front(&cmdline -> pipes);
     }
     else if (strcmp(cmd, "bg") == 0) {
         pipe -> status = BACKGROUND;
         if (kill(-pipe -> pgid, SIGCONT) < 0) {
             esh_sys_fatal_error("Error: failed to bg");
         }
+        list_pop_front(&cmdline -> pipes);
+    }
+    else if (strcmp(cmd, "kill") == 0) {
+    
+    }
+    else if (strcmp(cmd, "stop") == 0) {
+    
     }
     else if (strcmp(cmd, "exit") == 0) {
-        printf("Exiting\n");
+        #ifdef DEBUG
+            printf("Exiting\n");
+        #endif
+        list_pop_front(&cmdline -> pipes);
         exit(0);
-    }
-    else {
-        
     }
     
     return is_built_in;

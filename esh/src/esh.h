@@ -120,7 +120,8 @@ enum job_status  {
     STOPPED,        /* job is stopped via SIGSTOP */
     NEEDSTERMINAL,  /* job is stopped because it was a background job
                        and requires exclusive terminal access */
-    DONE
+    TERMINATED,     /* job is terminated via SIGTERM */
+    DONE            /* job is exited successfully */
 };
 
 /* A pipeline is a list of one or more commands. 
