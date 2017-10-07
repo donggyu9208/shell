@@ -8,9 +8,9 @@ LDLIBS=-ll -ldl -lreadline -lcurses
 CFLAGS=-Wall -Werror -Wmissing-prototypes -g -fPIC
 #YFLAGS=-v
 
-LIB_OBJECTS=list.o esh-utils.o esh-sys-utils.o esh-utils-helper.o
+LIB_OBJECTS=list.o esh-utils.o esh-sys-utils.o esh-utils-helper.o esh-utils-jobs.o
 OBJECTS=esh.o
-HEADERS=list.h esh.h esh-sys-utils.h esh-utils-helper.h
+HEADERS=list.h esh.h esh-sys-utils.h esh-utils-helper.h esh-utils-jobs.h
 PLUGINDIR=plugins
 PLUGIN_C=$(wildcard $(PLUGINDIR)/*.c)
 PLUGIN_SO=$(patsubst %.c,%.so,$(PLUGIN_C))

@@ -15,11 +15,13 @@
 #include <limits.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #include "esh.h"
 #include "esh-utils-helper.h"
 #include "esh-sys-utils.h"
-
+#include "esh-utils-jobs.h"
 
 
 #ifdef __clang__
@@ -33,66 +35,6 @@ static const char rcsid [] = "$Id: esh-utils.c,v 1.5 2011/03/29 15:46:28 cs3214 
 
 //#define DEBUG 0
 //#define DEBUG_JOBS
-
-static struct
-esh_pipeline * find_job(int jid_look) {
-    struct list_elem * e;
-    for(e = list_begin(&jobs_list); e != list_end(&jobs_list); e = list_next(e)) {
-        
-        struct esh_pipeline * current_job = list_entry(e, struct esh_pipeline, elem);
-        if (jid_look == current_job -> jid) {
-            return current_job;
-        }
-    }
-    
-    return NULL;
-}
-
-static void 
-print_job(struct esh_pipeline * job) {
-    struct list_elem * e;
-    for (e = list_begin(&job -> commands); e != list_end (&job->commands); e = list_next (e)) {
-        struct esh_command * cmd = list_entry(e, struct esh_command, elem);
-        
-        char **p = cmd -> argv;
-        printf("(");
-        while (*p) {
-            printf(" %s", *p++);
-        }
-        if (job -> status == BACKGROUND) {
-            printf(" & )\n");
-        }
-        else {
-            printf(" )\n");
-        }
-    }
-}
-
-const char *
-print_job_status(enum job_status status) {
-    static char * status_output[] = {"Running", "Foreground", "Stopped", "Needs Terminal", "Done"};
-    
-    switch(status) {
-        case BACKGROUND:
-            return status_output[0];
-            break;
-        case FOREGROUND:
-            return status_output[1];
-            break;
-        case STOPPED:
-            return status_output[2];
-            break;
-        case NEEDSTERMINAL:
-            return status_output[3];
-            break;
-        case DONE:
-            return status_output[4];
-            break;
-        default:
-            return NULL;
-            break;
-    }
-}
 
 /**
  * Assign ownership of the terminal to process group
@@ -153,7 +95,7 @@ child_status_change(pid_t child_pid, int status) {
                     esh_sys_tty_save(&pipe -> saved_tty_state);
                     printf("[%d]\tStopped\t\t\t", pipe -> jid);
                     print_job(pipe);
-                    give_terminal_to(getpgrp(), terminal);
+                    //give_terminal_to(getpgrp(), terminal);
                 }
                 else if (WIFCONTINUED(status)) {
                     list_remove(list_elem_commands);
@@ -272,48 +214,6 @@ wait_for_job(struct esh_pipeline * pipeline)
     #endif
 }
 
-static void esh_command_jobs(struct esh_command_line * cmdline) {   
-    struct list_elem * e;
-    for (e = list_begin (&jobs_list); e != list_end (&jobs_list); e = list_next (e)) {
-        struct esh_pipeline * job = list_entry(e, struct esh_pipeline, elem);
-        if (job != NULL) {
-            #ifdef DEBUG_JOBS
-                printf("Jobs running\n");
-            #endif
-            
-            // The most recent job is denoted as [job_id]+
-            // The second most recent job is denoted as [job_id]- 
-            // Rest jobs are denoted without any +/- symbols [job_id]
-            if (list_next(e) == list_end (&jobs_list)) {
-                printf("[%d]+\t%s\t\t\t", job -> jid, print_job_status(job -> status));
-            }
-            else if (list_next(list_next(e)) == list_end(&jobs_list)) {
-                printf("[%d]-\t%s\t\t\t", job -> jid, print_job_status(job -> status));
-            }
-            else {
-                printf("[%d]\t%s\t\t\t", job -> jid, print_job_status(job -> status));
-            }
-            
-            // Prints the name of the job
-            print_job(job);
-            
-            // Use this instead of list_remove when you want to replicate
-            // Exactly like how shell is behaving
-            // When job status is DONE || TERMINATED, remove from jobs list after displaying "Done"
-            // if (job -> status == DONE || job -> status == TERMINATED) {
-                // list_remove(e);
-            // }
-        }
-        else {
-            #ifdef DEBUG_JOBS
-                printf("No Jobs running\n");
-            #endif
-        }
-    }
-    // remove jobs command from pipeline
-    list_pop_front(&cmdline -> pipes);      
-}
-
 // static void esh_command_stop(struct esh_command_line * cmdline) {
     // if (kill(-
 // }
@@ -408,10 +308,6 @@ is_esh_command_built_in(struct esh_command * esh_cmd, struct esh_pipeline * pipe
 void
 esh_command_helper(struct esh_command * cmd, struct esh_pipeline * pipe)
 {
-    #ifdef DEBUG
-        printf("\nIn Child Process:\n");
-	#endif
-    
     // --------- Setting PID and PGID ------------- //
     pid_t child_pid = getpid();          // Child pid
     cmd -> pid = child_pid;               // Each process PID = getpid();
@@ -433,45 +329,60 @@ esh_command_helper(struct esh_command * cmd, struct esh_pipeline * pipe)
         give_terminal_to(pipe -> pgid, terminal);
     }
     
+    
     // ---------- Input and Output ----------- //
+    //  O_RDONLY:   Read-Only
+    //  O_WRONLY:   Write-Only
+    //  O_RDWR:     Read/Write
+    //  O_APPEND:   Append mode
+    //  O_CREAT:    If file does not exits, it will be created
+    //  O_TRUNC:    If the file already exists and is a regular file and the
+    //              access mode allows writing (i.e., is O_RDWR or O_WRONLY) it
+    //              will be truncated to length 0.
+    
     if (cmd -> iored_output) {
         // Symbol (>)
        printf("  stdout %ss to %s\n", 
-       cmd->append_to_output ? "append" : "write",
-       cmd->iored_output);
+       cmd -> append_to_output ? "append" : "write",
+       cmd -> iored_output);
        
+       int out;
        
+       // credit: http://www.cs.loyola.edu/~jglenn/702/S2005/Examples/dup2.html
+       if (cmd -> append_to_output) {
+           out = open(cmd -> iored_output, 
+                      O_WRONLY | O_APPEND | O_CREAT, 
+                      0666);
+       }
+       else {
+           out = open(cmd -> iored_output, 
+                      O_WRONLY | O_TRUNC | O_CREAT, 
+                      0666);
+       }
+       
+       if (dup2(out, STDOUT_FILENO) < 0) {                          // replace standard output with output file
+            esh_sys_fatal_error("Error: dup2(out, STDOUT_FILENO)");
+       }
+       close(out);
     }
 
-
-    if (cmd->iored_input) {
-        // Symbol (<)
+    // credit: http://www.cs.loyola.edu/~jglenn/702/S2005/Examples/dup2.html
+    if (cmd -> iored_input) {
+        // Symbol (< or <<)
         printf("  stdin reads from %s\n", cmd->iored_input);
-        // int fd_in = open(cmd -> iored_input, O_RDONLY, 0);
-        // if (dup2(fd, STDIN_FILENO) < 0) {
-            // esh_sys_fatal_error("Error: dup2(fd, STDIN_FILENO)");
-        // }
-        // close(fd_in);
+        
+        
+        int in = open(cmd -> iored_input, O_RDONLY);
+        if (dup2(in, STDIN_FILENO) < 0) {                           // replace standard input with input file
+            esh_sys_fatal_error("Error: dup2(in, STDIN_FILENO)");
+        }
+        close(in);
     }
     
     // ------------- Execute Command ------------ //
-    
-    #ifdef DEBUG
-        char **p = cmd->argv;
-        printf("\tCommand:");
-            while (*p)
-                printf(" %s", *p++);
-
-        printf("\n");
-	#endif
-    
     if (execvp(cmd -> argv[0], cmd -> argv) < 0) {
         esh_sys_fatal_error("execvp error\n");
     }
-    
-    #ifdef DEBUG
-        printf("Done Child Process\n\n");
-    #endif
 }
 
 /* --------- PIPELINE --------- */ 
