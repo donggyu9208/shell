@@ -34,6 +34,20 @@ static const char rcsid [] = "$Id: esh-utils.c,v 1.5 2011/03/29 15:46:28 cs3214 
 //#define DEBUG 0
 //#define DEBUG_JOBS
 
+static struct
+esh_pipeline * find_job(int jid_look) {
+    struct list_elem * e;
+    for(e = list_begin(&jobs_list); e != list_end(&jobs_list); e = list_next(e)) {
+        
+        struct esh_pipeline * current_job = list_entry(e, struct esh_pipeline, elem);
+        if (jid_look == current_job -> jid) {
+            return current_job;
+        }
+    }
+    
+    return NULL;
+}
+
 static void 
 print_job(struct esh_pipeline * job) {
     struct list_elem * e;
@@ -41,14 +55,15 @@ print_job(struct esh_pipeline * job) {
         struct esh_command * cmd = list_entry(e, struct esh_command, elem);
         
         char **p = cmd -> argv;
+        printf("(");
         while (*p) {
             printf(" %s", *p++);
         }
         if (job -> status == BACKGROUND) {
-            printf(" &\n");
+            printf(" & )\n");
         }
         else {
-            printf("\n");
+            printf(" )\n");
         }
     }
 }
@@ -134,12 +149,14 @@ child_status_change(pid_t child_pid, int status) {
             if (command -> pid == child_pid) {
                  // Stopped by Ctrl + Z
                 if (WIFSTOPPED(status)) {
-                    #ifdef DEBUG_SIGNAL
-                        printf("Signal: Child Process is Stopped\n");
-                    #endif
                     pipe -> status = STOPPED;
-                    printf("\n[%d]+\tStopped\t\t\t", pipe -> jid);
+                    esh_sys_tty_save(&pipe -> saved_tty_state);
+                    printf("[%d]\tStopped\t\t\t", pipe -> jid);
                     print_job(pipe);
+                    give_terminal_to(getpgrp(), terminal);
+                }
+                else if (WIFCONTINUED(status)) {
+                    list_remove(list_elem_commands);
                 }
                 // KILLED by kill command [TERMINATED]
                 else if (WTERMSIG(status)) {
@@ -147,9 +164,15 @@ child_status_change(pid_t child_pid, int status) {
                         printf("Signal: Processed is interrupted and is terminated\n");
                     #endif
                     pipe -> status = TERMINATED;
-                    if (!pipe -> bg_job) {
-                        list_remove(list_elem_commands);
-                    }
+                    list_remove(list_elem_commands);
+                    //give_terminal_to(getpgrp(), terminal);
+                    
+                    // Use this instead of list_remove when you want to replicate
+                    // Exactly like how shell is behaving
+                    // list_remove(list_elem_commands);
+                    // if (!pipe -> bg_job) {
+                        // list_remove(list_elem_commands);
+                    // }
                 }
                 // Exited normally [DONE]
                 else if (WIFEXITED(status)) {
@@ -157,9 +180,14 @@ child_status_change(pid_t child_pid, int status) {
                         printf("Signal: Process is terminated normally\n");
                     #endif
                     pipe -> status = DONE;
-                    if (!pipe -> bg_job) {
-                        list_remove(list_elem_commands);
-                    }
+                    list_remove(list_elem_commands);
+                    //give_terminal_to(getpgrp(), terminal);
+                    
+                    // Use this instead of list_remove when you want to replicate
+                    // Exactly like how shell is behaving
+                    // if (!pipe -> bg_job) {
+                        // list_remove(list_elem_commands);
+                    // }
                 }                
             }
             
@@ -235,6 +263,7 @@ wait_for_job(struct esh_pipeline * pipeline)
 
         pid_t child_pid = waitpid(-1, &status, WUNTRACED);
         if (child_pid != -1) {
+            //give_terminal_to(getpgrp(), terminal);
             child_status_change(child_pid, status);
         }
     }
@@ -268,10 +297,12 @@ static void esh_command_jobs(struct esh_command_line * cmdline) {
             // Prints the name of the job
             print_job(job);
             
+            // Use this instead of list_remove when you want to replicate
+            // Exactly like how shell is behaving
             // When job status is DONE || TERMINATED, remove from jobs list after displaying "Done"
-            if (job -> status == DONE || job -> status == TERMINATED) {
-                list_remove(e);
-            }
+            // if (job -> status == DONE || job -> status == TERMINATED) {
+                // list_remove(e);
+            // }
         }
         else {
             #ifdef DEBUG_JOBS
@@ -283,12 +314,18 @@ static void esh_command_jobs(struct esh_command_line * cmdline) {
     list_pop_front(&cmdline -> pipes);      
 }
 
+// static void esh_command_stop(struct esh_command_line * cmdline) {
+    // if (kill(-
+// }
+
 static bool
-is_esh_command_built_in(char * command, struct esh_pipeline * pipe, struct esh_command_line *cmdline) {//, struct list * p_jobs_list, int * p_job_id) {
+is_esh_command_built_in(struct esh_command * esh_cmd, struct esh_pipeline * pipe, struct esh_command_line *cmdline) {//, struct list * p_jobs_list, int * p_job_id) {
+    char * command = esh_cmd -> argv[0];
+    
     char * built_in[] = {"jobs", "fg", "bg", "kill", "stop", "exit", NULL};
     int i = 0;
     char * cmd = NULL;
-    bool is_built_in = true;
+    bool is_built_in = true;        // Initialize is_built_in                                    
     
     while (built_in[i]) {
         if (strcmp(built_in[i], command) == 0) {
@@ -302,25 +339,7 @@ is_esh_command_built_in(char * command, struct esh_pipeline * pipe, struct esh_c
         return false;
     }
     else if (strcmp(cmd, "jobs") == 0) {
-        
-        
         esh_command_jobs(cmdline);
-    }
-    else if (strcmp(cmd, "fg") == 0) {
-        list_pop_front(&cmdline -> pipes);
-    }
-    else if (strcmp(cmd, "bg") == 0) {
-        pipe -> status = BACKGROUND;
-        if (kill(-pipe -> pgid, SIGCONT) < 0) {
-            esh_sys_fatal_error("Error: failed to bg");
-        }
-        list_pop_front(&cmdline -> pipes);
-    }
-    else if (strcmp(cmd, "kill") == 0) {
-    
-    }
-    else if (strcmp(cmd, "stop") == 0) {
-    
     }
     else if (strcmp(cmd, "exit") == 0) {
         #ifdef DEBUG
@@ -328,6 +347,54 @@ is_esh_command_built_in(char * command, struct esh_pipeline * pipe, struct esh_c
         #endif
         list_pop_front(&cmdline -> pipes);
         exit(0);
+    }
+    else {
+        
+        // Argument for the command
+        char * char_jid;
+        int jid;
+        if ((char_jid = esh_cmd -> argv[1]) != NULL) {
+            jid = atoi(char_jid);
+        }
+        else {
+            jid = job_id;
+        }
+        
+        assert(job_id > 0);    
+        
+        struct esh_pipeline * found_job = find_job(jid);
+        
+        if (strcmp(cmd, "fg") == 0) {
+            esh_signal_block(SIGCHLD);                              // 1. Block the signal
+            found_job -> status = FOREGROUND;                       // 2. Set the status = FOREGROUND
+            give_terminal_to(found_job -> pgid, terminal);          // 3. Give terminal access to the found_job
+            if(kill(-found_job -> pgid, SIGCONT) < 0) {             // 4. Send SIGCONT signal to continue the process
+                esh_sys_fatal_error("Error ['fg']: SIGCONT");
+            }
+            
+            print_job(found_job);
+            wait_for_job(found_job);                                // 5. Wait for the job to terminate
+            give_terminal_to(shell_pid, terminal);                  // 6. Terminal Back to Shell
+            
+            esh_signal_unblock(SIGCHLD);                            // 7. Unblock signal
+        }
+        else if (strcmp(cmd, "bg") == 0) {
+            found_job -> status = BACKGROUND;                       // Similar to fg but without giving terminal access and waiting for job                          
+            if (kill(-found_job -> pgid, SIGCONT) < 0) {            // Send SIGCONT signal to continue the process from STOPPED
+                esh_sys_fatal_error("Error ['bg']: SIGCONT");
+            }
+        }
+        else if (strcmp(cmd, "kill") == 0) {                        //
+            if (kill(-found_job -> pgid, SIGKILL) < 0) {            //
+                esh_sys_fatal_error("Error ['kill']: SIGKILL");     //
+            }
+        }
+        else if (strcmp(cmd, "stop") == 0) {
+            if (kill(-found_job -> pgid, SIGSTOP) < 0) {
+                esh_sys_fatal_error("Error ['stop']: SIGSTOP");
+            }
+        }
+        list_pop_front(&cmdline -> pipes);
     }
     
     return is_built_in;
@@ -367,13 +434,24 @@ esh_command_helper(struct esh_command * cmd, struct esh_pipeline * pipe)
     }
     
     // ---------- Input and Output ----------- //
-    if (cmd -> iored_output)
-        printf("  stdout %ss to %s\n", 
-               cmd->append_to_output ? "append" : "write",
-               cmd->iored_output);
+    if (cmd -> iored_output) {
+        // Symbol (>)
+       printf("  stdout %ss to %s\n", 
+       cmd->append_to_output ? "append" : "write",
+       cmd->iored_output);
+       
+       
+    }
+
 
     if (cmd->iored_input) {
+        // Symbol (<)
         printf("  stdin reads from %s\n", cmd->iored_input);
+        // int fd_in = open(cmd -> iored_input, O_RDONLY, 0);
+        // if (dup2(fd, STDIN_FILENO) < 0) {
+            // esh_sys_fatal_error("Error: dup2(fd, STDIN_FILENO)");
+        // }
+        // close(fd_in);
     }
     
     // ------------- Execute Command ------------ //
@@ -412,17 +490,6 @@ esh_pipeline_helper(struct esh_pipeline * pipe, struct esh_command_line * cmdlin
     /* -------- Execvp ---------- */
     
     esh_signal_sethandler(SIGCHLD, sigchld_handler);
-    
-    job_id++;
-    // Handling Job_Id for pipelines
-    if (list_empty(&jobs_list)) {
-        job_id = 1;
-    }
-    
-    // Initialize pipe pgid
-    pipe -> jid = job_id;
-    pipe -> pgid = -1;
-    pid_t pid;
 
     struct list_elem * e;
     for (e = list_begin (&pipe->commands); e != list_end (&pipe->commands); e = list_next (e)) {
@@ -430,18 +497,28 @@ esh_pipeline_helper(struct esh_pipeline * pipe, struct esh_command_line * cmdlin
             printf("\t\tIn command loop\n");    
         #endif
         
-        struct esh_command * cmd = list_entry(e, struct esh_command, elem);
-        char * command = cmd -> argv[0];
+        struct esh_command * esh_cmd = list_entry(e, struct esh_command, elem);
    
         // Iterates through the command separated by "|"
-        if (!is_esh_command_built_in(command, pipe, cmdline)) {
+        if (!is_esh_command_built_in(esh_cmd, pipe, cmdline)) {
+            job_id++;
+            // Handling Job_Id for pipelines
+            if (list_empty(&jobs_list)) {
+                job_id = 1;
+            }
+            
+            // Initialize pipe pgid
+            pipe -> jid = job_id;
+            pipe -> pgid = -1;
+            pid_t pid;
+            
             // Block Child Process Signal to prevent race running condition
             esh_signal_block(SIGCHLD);
             
             pid = fork();
             if (pid == 0) {
                 // In the Child Process
-                esh_command_helper(cmd, pipe);
+                esh_command_helper(esh_cmd, pipe);
             }
             else if (pid < 0) {
                 // Fork Failed
@@ -454,7 +531,7 @@ esh_pipeline_helper(struct esh_pipeline * pipe, struct esh_command_line * cmdlin
                 
                 // In the Parent Process
                 pipe -> status = FOREGROUND;
-                cmd -> pid = pid;
+                esh_cmd -> pid = pid;
                 
                 if (pipe -> pgid == -1) {
                     pipe -> pgid = pid;             // Child PID set to parent PID
