@@ -142,7 +142,7 @@ struct esh_pipeline {
     enum job_status status;  /* Job status. */ 
     struct termios saved_tty_state;  /* The state of the terminal when this job was 
                                         stopped after having been in foreground */
-
+    bool is_piped;
     /* Add additional fields here if needed. */
 };
 
@@ -158,9 +158,8 @@ struct esh_command {
     struct list_elem elem;   /* Link element to link commands in pipeline. */
 
     pid_t   pid;             /* Process id. */
-    struct esh_pipeline * pipeline; 
-                              /* The pipeline of which this job is a part. */
-
+    struct esh_pipeline * pipeline;     /* The pipeline of which this job is a part. */                      
+    
     /* Add additional fields here if needed. */
 };
 
