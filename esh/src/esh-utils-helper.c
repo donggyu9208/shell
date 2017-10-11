@@ -97,7 +97,6 @@ child_status_change(pid_t child_pid, int status) {
                     esh_sys_tty_save(&pipeline -> saved_tty_state);
                     printf("[%d]\tStopped\t\t\t", pipeline -> jid);
                     print_job(pipeline);
-                    //give_terminal_to(getpgrp(), terminal);
                 }
                 else if (WIFCONTINUED(status)) {
                     list_remove(list_elem_commands);
@@ -109,14 +108,6 @@ child_status_change(pid_t child_pid, int status) {
                     #endif
                     pipeline -> status = TERMINATED;
                     list_remove(list_elem_commands);
-                    //give_terminal_to(getpgrp(), terminal);
-                    
-                    // Use this instead of list_remove when you want to replicate
-                    // Exactly like how shell is behaving
-                    // list_remove(list_elem_commands);
-                    // if (!pipeline -> bg_job) {
-                        // list_remove(list_elem_commands);
-                    // }
                 }
                 // Exited normally [DONE]
                 else if (WIFEXITED(status)) {
@@ -125,13 +116,6 @@ child_status_change(pid_t child_pid, int status) {
                     #endif
                     pipeline -> status = DONE;
                     list_remove(list_elem_commands);
-                    //give_terminal_to(getpgrp(), terminal);
-                    
-                    // Use this instead of list_remove when you want to replicate
-                    // Exactly like how shell is behaving
-                    // if (!pipeline -> bg_job) {
-                        // list_remove(list_elem_commands);
-                    // }
                 }                
             }
             
@@ -430,7 +414,6 @@ esh_pipeline_helper(struct esh_pipeline * pipeline, struct esh_command_line * cm
         
         // Create pipe of size of commands in a pipeline
         int pipe_1[2], pipe_2[2];
-        int i;
         
         for (; e != list_end(&pipeline -> commands); e = list_next (e)) {
             struct esh_command * esh_cmd = list_entry(e, struct esh_command, elem);
@@ -457,6 +440,7 @@ esh_pipeline_helper(struct esh_pipeline * pipeline, struct esh_command_line * cm
                 
                 // While the command is not the last command, you dup2 -> 1, STDOUT
                 if (pipeline -> is_piped && list_next(e) != list_tail(&pipeline->commands)) {
+                    // If the command is the the first command in the pipe
                     close(pipe_2[0]);
                     dup2(pipe_2[1], 1);
                     close(pipe_2[1]);
@@ -508,11 +492,8 @@ esh_pipeline_helper(struct esh_pipeline * pipeline, struct esh_command_line * cm
         struct list_elem * elem = list_pop_front(&cmdline -> pipes);
         list_push_back(&jobs_list, elem);
         
-        int size = list_size(&pipeline -> commands);
         if (!pipeline -> bg_job) {
-            for (i = 0; i < size; i++) {
-                wait_for_job(pipeline);
-            }
+            wait_for_job(pipeline);
         }
         give_terminal_to(shell_pid, terminal);
         esh_signal_unblock(SIGCHLD);
