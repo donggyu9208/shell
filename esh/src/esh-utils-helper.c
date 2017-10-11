@@ -454,8 +454,8 @@ esh_pipeline_helper(struct esh_pipeline * pipeline, struct esh_command_line * cm
                     dup2(pipe_1[0], 0);
                     close(pipe_1[0]);
                 }
-                // While the command is not the last command you 
-                // dup2 -> 1, STDOUT
+                
+                // While the command is not the last command, you dup2 -> 1, STDOUT
                 if (pipeline -> is_piped && list_next(e) != list_tail(&pipeline->commands)) {
                     close(pipe_2[0]);
                     dup2(pipe_2[1], 1);
@@ -471,28 +471,23 @@ esh_pipeline_helper(struct esh_pipeline * pipeline, struct esh_command_line * cm
                 /* --------- PARENT PROCESS ----------- */
                 // --------- Setting PID and PGID ------------- //
                 
-                if (pipeline -> is_piped) {
-                    if (e != list_begin(&pipeline -> commands)) {
-                        close(pipe_1[0]);
-                        close(pipe_1[1]);
-                    }
-                    
-                    // While command is not the last command in pipe
-                    // continue update the pipe so that 
-                    // output of the previous command gets transferred
-                    // to the input of the next command
-                    if (list_next(e) != list_tail(&pipeline -> commands)) {
-                        pipe_1[0] = pipe_2[0];
-                        pipe_1[1] = pipe_2[1];
-                    }
-                    
-                    if (list_next(e) == list_tail(&pipeline -> commands)) {
-                        close(pipe_1[0]);
-                        close(pipe_1[1]);
-                        close(pipe_2[0]);
-                        close(pipe_2[1]);
-                    }
-                    
+                if (pipeline -> is_piped && e != list_begin(&pipeline->commands)) {
+                    close(pipe_1[0]);
+                    close(pipe_1[1]);
+                }
+                
+                // While command is not the last command in pipe continue update the pipe so that 
+                // output of the previous command gets transferred to the input of the next command
+                if (pipeline -> is_piped && list_next(e) != list_tail(&pipeline -> commands)) {
+                    pipe_1[0] = pipe_2[0];
+                    pipe_1[1] = pipe_2[1];
+                }
+                
+                if (pipeline -> is_piped && list_next(e) == list_tail(&pipeline -> commands)) {
+                    close(pipe_1[0]);
+                    close(pipe_1[1]);
+                    close(pipe_2[0]);
+                    close(pipe_2[1]);
                 }
                 
                 pipeline -> status = FOREGROUND;
