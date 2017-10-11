@@ -215,14 +215,8 @@ wait_for_job(struct esh_pipeline * pipeline)
     #endif
 }
 
-// static void esh_command_stop(struct esh_command_line * cmdline) {
-    // if (kill(-
-// }
-
 static bool
-is_esh_command_built_in(struct esh_command * esh_cmd, struct esh_pipeline * pipeline, struct esh_command_line *cmdline) {//, struct list * p_jobs_list, int * p_job_id) {
-    char * command = esh_cmd -> argv[0];
-    
+is_esh_command_built_in(struct esh_command * esh_cmd, struct esh_pipeline * pipeline, struct esh_command_line *cmdline) {//, struct list * p_jobs_list, int * p_job_id) {    
     char * built_in[] = {"jobs", "fg", "bg", "kill", "stop", "exit", NULL};
     int i = 0;
     char * cmd = NULL;
@@ -431,20 +425,17 @@ esh_pipeline_helper(struct esh_pipeline * pipeline, struct esh_command_line * cm
         // pipes[1] = [write]   cat-> grep 
         
         // Create pipe of size of commands in a pipeline
-        int pipefd[list_size(&pipeline -> commands) * 2];
+        int pipe_1[2], pipe_2[2];
         int i;
-        if (pipeline -> is_piped) {
-            for (i = 0; i < list_size(&pipeline -> commands); i++) {
-                if (pipe(pipefd + i * 2) < 0) {
-                    esh_sys_fatal_error("Error: Creating pipes\n");
-                }
-            }
-        }
         
         for (; e != list_end(&pipeline -> commands); e = list_next (e)) {
-            #ifdef DEBUG_PIPE
-                // printf("Command_i is : [%d]\n", command_i);
-            #endif
+            // while the command is not the last command in the pipe
+            // continuously create a new pipe to connect from the first 
+            // pipe to the last pipe
+            if (pipeline -> is_piped && list_next(e) != list_tail(&pipeline -> commands)) {
+                pipe(pipe_2);
+            }
+            
             pid = fork();
             if (pid == 0) {
                  //  In the Child Process
@@ -455,30 +446,23 @@ esh_pipeline_helper(struct esh_pipeline * pipeline, struct esh_command_line * cm
                  //         [0, 1]     [2, 3]       [4, 5]
                  //
                  //  BUTTTT This doesn't work for some reason
-                if (pipeline -> is_piped) {  
-
-                     // if not the last command:
-                     // dup2(pipe[1], 1)
-                     // command_i   pipefd      STDOUT_FILENO
-                     // 0           1           1
-                     // 1           3           1
-                     // 2           5           1
-                     // ...         ...         ...
-                     if (list_next(e) != list_tail(&pipeline -> commands)) {
-                        if(dup2(pipefd[command_i * 2 + 1], 1) < 0 ) {
-                            #ifdef DEBUG_PIPE
-                            printf("In if not last command, dup2(1, 1) command_i: %d\n", command_i);
-                            #endif
-                            esh_sys_fatal_error("Error: Error duplicating pipe to STDOUT_FILENO\n");
-                        }
-                     }
-
-                     // Close all pipes after its use
-                     for(i = 0; i < 2 * list_size(&pipeline -> commands); i++) { 
-                        close(pipefd[i]);
-                     }
-                 }
-                 esh_command_helper(esh_cmd, pipeline);
+                if (pipeline -> is_piped) {
+                    // If the command is the the first command in the pipe
+                    if (e != list_begin(&pipeline -> commands)) {
+                        close(pipe_1[1]);
+                        dup2(pipe_1[0], 0);
+                        close(pipe_1[0]);
+                    }
+                    
+                    // While the command is not the last command you 
+                    // dup2 -> 1, STDOUT
+                    if (list_next(e) != list_tail(&pipeline -> commands)) {
+                        close(pipe_2[0]);
+                        dup2(pipe_2[1], 1);
+                        close(pipe_2[1]);
+                    }
+                }
+                esh_command_helper(esh_cmd, pipeline);
             }
             else if (pid < 0) {
                 // Fork Failed
@@ -488,23 +472,29 @@ esh_pipeline_helper(struct esh_pipeline * pipeline, struct esh_command_line * cm
                 /* --------- PARENT PROCESS ----------- */
                 // --------- Setting PID and PGID ------------- //
                 
-                // if not first command:
-                     // dup2(pipe[0], 0)
-                     // command_i   pipe_fd     STDIN_FILENO 
-                     // 1           0           0
-                     // 2           2           0
-                     // 3           4           0
-                     // ...         ...         ...
-                     if (e != list_begin(&pipeline -> commands)) {
-                         if (dup2(pipefd[(command_i - 1) * 2], 0) < 0) {
-                             
-                             #ifdef DEBUG_PIPE
-                             
-                                printf("In if not first command, dup2(0, 0) command_i: %d\n", command_i);
-                             #endif
-                             esh_sys_fatal_error("Error: Error duplicating pipe to STDIN_FILENO\n");
-                         }
-                     }
+                if (pipeline -> is_piped) {
+                    if (e != list_begin(&pipeline -> commands)) {
+                        close(pipe_1[0]);
+                        close(pipe_1[1]);
+                    }
+                    
+                    // While command is not the last command in pipe
+                    // continue update the pipe so that 
+                    // output of the previous command gets transferred
+                    // to the input of the next command
+                    if (list_next(e) != list_tail(&pipeline -> commands)) {
+                        pipe_1[0] = pipe_2[0];
+                        pipe_1[1] = pipe_2[1];
+                    }
+                    
+                    if (list_next(e) == list_tail(&pipeline -> commands)) {
+                        close(pipe_1[0]);
+                        close(pipe_1[1]);
+                        close(pipe_2[0]);
+                        close(pipe_2[1]);
+                    }
+                }
+                
                      
                 pipeline -> status = FOREGROUND;
                 esh_cmd -> pid = pid;
@@ -515,11 +505,7 @@ esh_pipeline_helper(struct esh_pipeline * pipeline, struct esh_command_line * cm
                 command_i++;
             }
         }
-    
-        for(i = 0; i < 2 * list_size(&pipeline -> commands); i++) { 
-            close(pipefd[i]);
-        }
-        
+
         if (pipeline -> bg_job) {
             pipeline -> status = BACKGROUND;
             printf("[%d] %d\n", pipeline -> jid, pipeline ->pgid);
