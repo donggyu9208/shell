@@ -95,8 +95,12 @@ child_status_change(pid_t child_pid, int status) {
                 if (WIFSTOPPED(status)) {
                     pipeline -> status = STOPPED;
                     esh_sys_tty_save(&pipeline -> saved_tty_state);
-                    printf("[%d]\tStopped\t\t\t", pipeline -> jid);
-                    print_job(pipeline);
+                    size_t size_i = 0;
+                    size_t pipeline_size = list_size (&pipeline -> commands);
+                    for (; size_i < pipeline_size; size_i++) {
+                        printf("[%d]\tStopped\t\t\t", pipeline -> jid);
+                        print_job(pipeline);
+                    }                    
                 }
                 else if (WIFCONTINUED(status)) {
                     list_remove(list_elem_commands);
@@ -116,7 +120,10 @@ child_status_change(pid_t child_pid, int status) {
                     #endif
                     pipeline -> status = DONE;
                     list_remove(list_elem_commands);
-                }                
+                }
+                else {
+                    list_remove(list_elem_commands);
+                }
             }
             
             if (list_empty(&pipeline -> commands)) {
@@ -242,38 +249,56 @@ is_esh_command_built_in(struct esh_command * esh_cmd, struct esh_pipeline * pipe
             jid = job_id;
         }
         
-        assert(job_id > 0);    
-        
         struct esh_pipeline * found_job = find_job(jid);
         
         if (strcmp(cmd, "fg") == 0) {
-            esh_signal_block(SIGCHLD);                              // 1. Block the signal
-            found_job -> status = FOREGROUND;                       // 2. Set the status = FOREGROUND
-            give_terminal_to(found_job -> pgid, terminal);          // 3. Give terminal access to the found_job
-            if(kill(-found_job -> pgid, SIGCONT) < 0) {             // 4. Send SIGCONT signal to continue the process
-                esh_sys_fatal_error("Error ['fg']: SIGCONT");
+            if (found_job != NULL) {
+                esh_signal_block(SIGCHLD);                              // 1. Block the signal
+                found_job -> status = FOREGROUND;                       // 2. Set the status = FOREGROUND
+                give_terminal_to(found_job -> pgid, terminal);          // 3. Give terminal access to the found_job
+                if(kill(-found_job -> pgid, SIGCONT) < 0) {             // 4. Send SIGCONT signal to continue the process
+                    esh_sys_fatal_error("Error ['fg']: SIGCONT");
+                }
+                
+                print_job(found_job);
+                wait_for_job(found_job);                                // 5. Wait for the job to terminate
+                give_terminal_to(shell_pid, terminal);                  // 6. Terminal Back to Shell
+                
+                esh_signal_unblock(SIGCHLD);                            // 7. Unblock signal
             }
-            
-            print_job(found_job);
-            wait_for_job(found_job);                                // 5. Wait for the job to terminate
-            give_terminal_to(shell_pid, terminal);                  // 6. Terminal Back to Shell
-            
-            esh_signal_unblock(SIGCHLD);                            // 7. Unblock signal
+            else {
+                printf("esh:    fg: current: no such job\n");
+            }
         }
         else if (strcmp(cmd, "bg") == 0) {
-            found_job -> status = BACKGROUND;                       // Similar to fg but without giving terminal access and waiting for job                          
-            if (kill(-found_job -> pgid, SIGCONT) < 0) {            // Send SIGCONT signal to continue the process from STOPPED
-                esh_sys_fatal_error("Error ['bg']: SIGCONT");
+            if (found_job != NULL) {
+                found_job -> status = BACKGROUND;                       // Similar to fg but without giving terminal access and waiting for job                          
+                if (kill(-found_job -> pgid, SIGCONT) < 0) {            // Send SIGCONT signal to continue the process from STOPPED
+                    esh_sys_fatal_error("Error ['bg']: SIGCONT");
+                }
+            }
+            else {
+                printf("esh:    bg: current: no such job\n");
             }
         }
-        else if (strcmp(cmd, "kill") == 0) {                        //
-            if (kill(-found_job -> pgid, SIGKILL) < 0) {            //
-                esh_sys_fatal_error("Error ['kill']: SIGKILL");     //
+        else if (strcmp(cmd, "kill") == 0) {
+            if (found_job != NULL) {
+                if (kill(-found_job -> pgid, SIGKILL) < 0) {
+                    esh_sys_fatal_error("Error ['kill']: SIGKILL");
+                }
+            }
+            else {
+                printf("esh:    kill: current: no such job\n");
             }
         }
         else if (strcmp(cmd, "stop") == 0) {
-            if (kill(-found_job -> pgid, SIGSTOP) < 0) {
-                esh_sys_fatal_error("Error ['stop']: SIGSTOP");
+            if (found_job != NULL) {
+                if (kill(-found_job -> pgid, SIGSTOP) < 0) {
+                    esh_sys_fatal_error("Error ['stop']: SIGSTOP");
+                }
+            }
+            else {
+                printf("esh:    stop: current: no such job\n");
             }
         }
         list_pop_front(&cmdline -> pipes);
@@ -383,9 +408,22 @@ esh_pipeline_helper(struct esh_pipeline * pipeline, struct esh_command_line * cm
     
     struct list_elem * e = list_begin (&pipeline -> commands);
     struct esh_command * esh_cmd = list_entry(e, struct esh_command, elem);
-
+    
+    bool is_plugin = false;
+    struct list_elem * e_plug = list_begin(&esh_plugin_list);
+    for (; e_plug != list_end(&esh_plugin_list); e_plug = list_next(e_plug)) {
+        struct esh_plugin * plugin = list_entry(e_plug, struct esh_plugin, elem);
+        if (plugin->process_builtin == NULL) {
+            continue;
+        }
+        //if the command is a plugin then process
+        if(plugin->process_builtin(esh_cmd))
+            is_plugin = true;
+            continue;
+    }
+    
     // Iterates through the command separated by "|"
-    if (!is_esh_command_built_in(esh_cmd, pipeline, cmdline)) {
+    if (!is_esh_command_built_in(esh_cmd, pipeline, cmdline) && !is_plugin) {
         
         int command_i = 0;
         /* ------------- JOB HANDLING --------------- */
@@ -416,7 +454,14 @@ esh_pipeline_helper(struct esh_pipeline * pipeline, struct esh_command_line * cm
         int pipe_1[2], pipe_2[2];
         
         for (; e != list_end(&pipeline -> commands); e = list_next (e)) {
-            struct esh_command * esh_cmd = list_entry(e, struct esh_command, elem);
+            struct esh_command * command = list_entry(e, struct esh_command, elem);
+            // struct esh_command * command;
+            // if (pipeline -> is_piped) {
+                // command = list_entry(e, struct esh_command, elem);
+            // }
+            // else {
+                
+            // }
             
             // while the command is not the last command in the pipe
             // continuously create a new pipe to connect from the first 
@@ -430,22 +475,27 @@ esh_pipeline_helper(struct esh_pipeline * pipeline, struct esh_command_line * cm
             
             pid = fork();
             if (pid == 0) {
-                 //  In the Child Process
-                if (pipeline -> is_piped && e != list_begin(&pipeline->commands)) {
-                    // If the command is the the first command in the pipe
-                    close(pipe_1[1]);
-                    dup2(pipe_1[0], 0);
-                    close(pipe_1[0]);
-                }
+                //  In the Child Process
                 
-                // While the command is not the last command, you dup2 -> 1, STDOUT
-                if (pipeline -> is_piped && list_next(e) != list_tail(&pipeline->commands)) {
-                    // If the command is the the first command in the pipe
-                    close(pipe_2[0]);
-                    dup2(pipe_2[1], 1);
-                    close(pipe_2[1]);
+                // Piping Process
+                if (pipeline -> is_piped) {
+                    if (e != list_begin(&pipeline -> commands)) {
+                        // If the command is the the first command in the pipe
+                        dup2(pipe_1[0], 0);
+                        close(pipe_1[1]);
+                        close(pipe_1[0]);
+                    }
+                    
+                    // While the command is not the last command, you dup2 -> 1, STDOUT
+                    if (list_next(e) != list_tail(&pipeline -> commands)) {
+                        // If the command is the the first command in the pipe
+                        dup2(pipe_2[1], 1);
+                        close(pipe_2[0]);
+                        close(pipe_2[1]);
+                    }
                 }
-                esh_command_helper(esh_cmd, pipeline);
+                 
+                esh_command_helper(command, pipeline);
             }
             else if (pid < 0) {
                 // Fork Failed
@@ -454,24 +504,25 @@ esh_pipeline_helper(struct esh_pipeline * pipeline, struct esh_command_line * cm
             else {
                 /* --------- PARENT PROCESS ----------- */
                 // --------- Setting PID and PGID ------------- //
-                
-                if (pipeline -> is_piped && e != list_begin(&pipeline->commands)) {
-                    close(pipe_1[0]);
-                    close(pipe_1[1]);
-                }
-                
-                // While command is not the last command in pipe continue update the pipe so that 
-                // output of the previous command gets transferred to the input of the next command
-                if (pipeline -> is_piped && list_next(e) != list_tail(&pipeline -> commands)) {
-                    pipe_1[0] = pipe_2[0];
-                    pipe_1[1] = pipe_2[1];
-                }
-                
-                if (pipeline -> is_piped && list_next(e) == list_tail(&pipeline -> commands)) {
-                    close(pipe_1[0]);
-                    close(pipe_1[1]);
-                    close(pipe_2[0]);
-                    close(pipe_2[1]);
+                if (pipeline -> is_piped) {
+                    if (e != list_begin(&pipeline->commands)) {
+                        close(pipe_1[0]);
+                        close(pipe_1[1]);
+                    }
+                    
+                    // While command is not the last command in pipe continue update the pipe so that 
+                    // output of the previous command gets transferred to the input of the next command
+                    if (list_next(e) != list_tail(&pipeline -> commands)) {
+                        pipe_1[0] = pipe_2[0];
+                        pipe_1[1] = pipe_2[1];
+                    }
+                    
+                    if (list_next(e) == list_tail(&pipeline -> commands)) {
+                        close(pipe_1[0]);
+                        close(pipe_1[1]);
+                        close(pipe_2[0]);
+                        close(pipe_2[1]);
+                    }
                 }
                 
                 pipeline -> status = FOREGROUND;
@@ -504,7 +555,7 @@ esh_pipeline_helper(struct esh_pipeline * pipeline, struct esh_command_line * cm
 /* Print esh_command_line structure to stdout */
 void 
 esh_command_line_helper(struct esh_command_line * cmdline)
-{        
+{
     while (!list_empty(&cmdline->pipes)) {
         struct esh_pipeline * pipeline = list_entry(list_begin(&cmdline -> pipes), struct esh_pipeline, elem);
         esh_pipeline_helper(pipeline, cmdline);

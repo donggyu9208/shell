@@ -127,6 +127,7 @@ main(int ac, char *av[])
         }
     }
 
+    //esh_plugin_load_from_directory("plugins/");
     esh_plugin_initialize(&shell);
     setpgrp();                              // set current pid to pgid
     shell_pid = getpid();                    
@@ -154,8 +155,6 @@ main(int ac, char *av[])
             continue;
         }
         
-                                                  // parsed command line passed to print out its command
-        //esh_command_line_print(cline);
         esh_command_line_helper(cline);
         esh_command_line_free(cline);
         

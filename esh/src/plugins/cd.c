@@ -24,7 +24,7 @@ chdir_builtin(struct esh_command *cmd)
 {
     if (strcmp(cmd->argv[0], "cd"))
         return false;
-
+    
     char *dir = cmd->argv[1];
     // if no argument is given, default to home directory
     if (dir == NULL) {

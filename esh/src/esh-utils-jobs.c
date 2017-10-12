@@ -34,15 +34,28 @@ esh_pipeline * find_job(int jid_look) {
     return NULL;
 }
 
+
+static void 
+print_cmd(struct esh_command * cmd) {
+    char **p = cmd -> argv;
+    while (*p) {
+        printf(" %s", *p++);
+    }
+}
+
 void esh_command_jobs(struct esh_command_line * cmdline) {   
     struct list_elem * e;
     for (e = list_begin (&jobs_list); e != list_end (&jobs_list); e = list_next (e)) {
-        struct esh_pipeline * job = list_entry(e, struct esh_pipeline, elem);
+        struct esh_pipeline * job = list_entry(e, struct esh_pipeline, elem);        
         if (job != NULL) {
-            #ifdef DEBUG_JOBS
-                printf("Jobs running\n");
-            #endif
-            
+            // Use this instead of list_remove when you want to replicate
+            // Exactly like how shell is behaving
+            // When job status is DONE || TERMINATED, remove from jobs list after displaying "Done"
+            if (job -> status == DONE || job -> status == TERMINATED) {
+                list_remove(e);
+                break;
+            }
+            struct list_elem * e_job;
             // The most recent job is denoted as [job_id]+
             // The second most recent job is denoted as [job_id]- 
             // Rest jobs are denoted without any +/- symbols [job_id]
@@ -56,15 +69,20 @@ void esh_command_jobs(struct esh_command_line * cmdline) {
                 printf("[%d]\t%s\t\t\t", job -> jid, print_job_status(job -> status));
             }
             
-            // Prints the name of the job
-            print_job(job);
-            
-            // Use this instead of list_remove when you want to replicate
-            // Exactly like how shell is behaving
-            // When job status is DONE || TERMINATED, remove from jobs list after displaying "Done"
-            if (job -> status == DONE || job -> status == TERMINATED) {
-                list_remove(e);
+            for (e_job = list_begin(&job -> commands); e_job != list_end (&job->commands); e_job = list_next (e_job)) {
+                if (e_job == list_begin(&job -> commands)) {
+                    printf("(");
+                }
+                struct esh_command * cmd = list_entry(e_job, struct esh_command, elem);
+                
+                // Prints the name of the job
+                print_cmd(cmd);
+                
+                if (list_next (e_job) != list_end (&job -> commands)) {
+                    printf(" | ");
+                }
             }
+            printf(" )\n");
         }
         else {
             #ifdef DEBUG_JOBS
@@ -78,22 +96,21 @@ void esh_command_jobs(struct esh_command_line * cmdline) {
 
 void 
 print_job(struct esh_pipeline * job) {
-    struct list_elem * e;
-    for (e = list_begin(&job -> commands); e != list_end (&job->commands); e = list_next (e)) {
-        struct esh_command * cmd = list_entry(e, struct esh_command, elem);
+    struct list_elem * e_job;
+    for (e_job = list_begin(&job -> commands); e_job != list_end (&job->commands); e_job = list_next (e_job)) {
+        if (e_job == list_begin(&job -> commands)) {
+            printf("(");
+        }
+        struct esh_command * cmd = list_entry(e_job, struct esh_command, elem);
         
-        char **p = cmd -> argv;
-        printf("(");
-        while (*p) {
-            printf(" %s", *p++);
-        }
-        if (job -> status == BACKGROUND) {
-            printf(" & )\n");
-        }
-        else {
-            printf(" )\n");
+        // Prints the name of the job
+        print_cmd(cmd);
+        
+        if (list_next (e_job) != list_end (&job -> commands)) {
+            printf(" | ");
         }
     }
+    printf(" )\n");
 }
 
 const char *
