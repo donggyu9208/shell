@@ -366,9 +366,9 @@ esh_command_helper(struct esh_command * cmd, struct esh_pipeline * pipeline)
     
     if (cmd -> iored_output) {
         // Symbol (>)
-       printf("  stdout %ss to %s\n", 
-       cmd -> append_to_output ? "append" : "write",
-       cmd -> iored_output);
+       // printf("  stdout %ss to %s\n", 
+       // cmd -> append_to_output ? "append" : "write",
+       // cmd -> iored_output);
        
        int out;
        //FILE* file;
@@ -398,7 +398,7 @@ esh_command_helper(struct esh_command * cmd, struct esh_pipeline * pipeline)
     // credit: http://www.cs.loyola.edu/~jglenn/702/S2005/Examples/dup2.html
     if (cmd -> iored_input) {
         // Symbol (< or <<)
-        printf("  stdin reads from %s\n", cmd->iored_input);
+        //printf("  stdin reads from %s\n", cmd->iored_input);
         
         
         int in = open(cmd -> iored_input, O_RDONLY);
@@ -419,29 +419,39 @@ esh_command_helper(struct esh_command * cmd, struct esh_pipeline * pipeline)
 void
 esh_pipeline_helper(struct esh_pipeline * pipeline, struct esh_command_line * cmdline)
 {
-    /* -------- PLUG_IN ---------- */
-    
+    /* ------- INITIALIZATION ---------- */
+        
     esh_signal_sethandler(SIGCHLD, sigchld_handler);
     pipeline -> is_piped = (list_size(&pipeline -> commands) > 1) ? true : false;
     
     struct list_elem * e = list_begin (&pipeline -> commands);
     struct esh_command * esh_cmd = list_entry(e, struct esh_command, elem);
     
-    bool is_plugin = false;
+    /* -------- PLUG_IN ---------- */    
     struct list_elem * e_plug = list_begin(&esh_plugin_list);
+    bool is_invalid_command = true;
     for (; e_plug != list_end(&esh_plugin_list); e_plug = list_next(e_plug)) {
         struct esh_plugin * plugin = list_entry(e_plug, struct esh_plugin, elem);
-        if (plugin->process_builtin == NULL) {
+        //if the command is a plugin then process
+        is_plugin = true;
+        if(plugin -> process_builtin == NULL) {
+            if (is_invalid_command) {
+                printf("\tInvalid command\n");
+            }
+            else {
+                is_invalid_command = true;
+            }
             continue;
         }
-        //if the command is a plugin then process
-        if(plugin->process_builtin(esh_cmd))
-            is_plugin = true;
+        
+        if(plugin -> process_builtin(esh_cmd)) {
+            is_invalid_command = false;
             continue;
+        }
     }
     
     // Iterates through the command separated by "|"
-    if (!is_esh_command_built_in(esh_cmd, pipeline, cmdline) && !is_plugin) {
+    if (!is_plugin && !is_esh_command_built_in(esh_cmd, pipeline, cmdline)) {
         
         int command_i = 0;
         /* ------------- JOB HANDLING --------------- */
@@ -572,7 +582,8 @@ esh_pipeline_helper(struct esh_pipeline * pipeline, struct esh_command_line * cm
 void 
 esh_command_line_helper(struct esh_command_line * cmdline)
 {
-    while (!list_empty(&cmdline->pipes)) {
+    is_plugin = false;
+    while (!list_empty(&cmdline->pipes) && !is_plugin) {
         struct esh_pipeline * pipeline = list_entry(list_begin(&cmdline -> pipes), struct esh_pipeline, elem);
         esh_pipeline_helper(pipeline, cmdline);
     }

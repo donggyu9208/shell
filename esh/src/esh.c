@@ -15,6 +15,7 @@
 #include "esh-sys-utils.h"
 
 //#define DEBUG 1
+#define PLUG_IN 0
 static void
 usage(char *progname)
 {
@@ -111,9 +112,6 @@ main(int ac, char *av[])
     job_id = 0;
     list_init(&jobs_list);
     
-    //struct list *p_jobs_list = &jobs_list;
-    //int * p_job_id = &job_id;
-    
     /* Process command-line arguments. See getopt(3) */
     while ((opt = getopt(ac, av, "hp:")) > 0) {
         switch (opt) {
@@ -126,8 +124,10 @@ main(int ac, char *av[])
             break;
         }
     }
-
-    //esh_plugin_load_from_directory("plugins/");
+    
+    #ifdef PLUG_IN
+        esh_plugin_load_from_directory("plugins/");
+    #endif
     esh_plugin_initialize(&shell);
     setpgrp();                              // set current pid to pgid
     shell_pid = getpid();                    

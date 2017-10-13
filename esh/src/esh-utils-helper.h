@@ -21,4 +21,5 @@ esh_pipeline_helper(struct esh_pipeline *pipeline, struct esh_command_line * cmd
 void 
 esh_command_line_helper(struct esh_command_line *cmdline);//, struct list * p_jobs_list, int * p_job_id, pid_t shell_pid); //, struct termios * terminal);
 
+bool is_plugin;
 #endif //__ESH_UTILS_HELPER_H

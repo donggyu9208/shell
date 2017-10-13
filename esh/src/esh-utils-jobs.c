@@ -49,11 +49,10 @@ void esh_command_jobs(struct esh_command_line * cmdline) {
             // Use this instead of list_remove when you want to replicate
             // Exactly like how shell is behaving
             // When job status is DONE || TERMINATED, remove from jobs list after displaying "Done"
-            // if (job -> status == DONE || job -> status == TERMINATED) {
-                // printf("%d\n", job -> status);
-                // list_remove(e);
-                // break;
-            // }
+            if (job -> status == DONE || job -> status == TERMINATED) {
+                list_remove(e);
+                break;
+            }
             
             // The most recent job is denoted as [job_id]+
             // The second most recent job is denoted as [job_id]- 
@@ -67,7 +66,6 @@ void esh_command_jobs(struct esh_command_line * cmdline) {
             else {
                 printf("[%d]\t%s        ", job -> jid, print_job_status(job -> status));
             }
-            
             
             struct list_elem * e_job;
             for (e_job = list_begin(&job -> commands); e_job != list_end (&job->commands); e_job = list_next (e_job)) {
