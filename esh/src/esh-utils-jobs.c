@@ -38,37 +38,38 @@ esh_pipeline * find_job(int jid_look) {
 static void 
 print_cmd(struct esh_command * cmd) {
     char **p = cmd -> argv;
-    while (*p) {
-        printf(" %s", *p++);
-    }
+    printf("%s %s", p[0], p[1]);
 }
 
-void esh_command_jobs(struct esh_command_line * cmdline) {   
+void esh_command_jobs(struct esh_command_line * cmdline) {
     struct list_elem * e;
     for (e = list_begin (&jobs_list); e != list_end (&jobs_list); e = list_next (e)) {
-        struct esh_pipeline * job = list_entry(e, struct esh_pipeline, elem);        
+        struct esh_pipeline * job = list_entry(e, struct esh_pipeline, elem);
         if (job != NULL) {
             // Use this instead of list_remove when you want to replicate
             // Exactly like how shell is behaving
             // When job status is DONE || TERMINATED, remove from jobs list after displaying "Done"
-            if (job -> status == DONE || job -> status == TERMINATED) {
-                list_remove(e);
-                break;
-            }
-            struct list_elem * e_job;
+            // if (job -> status == DONE || job -> status == TERMINATED) {
+                // printf("%d\n", job -> status);
+                // list_remove(e);
+                // break;
+            // }
+            
             // The most recent job is denoted as [job_id]+
             // The second most recent job is denoted as [job_id]- 
             // Rest jobs are denoted without any +/- symbols [job_id]
             if (list_next(e) == list_end (&jobs_list)) {
-                printf("[%d]+\t%s\t\t\t", job -> jid, print_job_status(job -> status));
+                printf("[%d]+\t%s        ", job -> jid, print_job_status(job -> status));
             }
             else if (list_next(list_next(e)) == list_end(&jobs_list)) {
-                printf("[%d]-\t%s\t\t\t", job -> jid, print_job_status(job -> status));
+                printf("[%d]-\t%s        ", job -> jid, print_job_status(job -> status));
             }
             else {
-                printf("[%d]\t%s\t\t\t", job -> jid, print_job_status(job -> status));
+                printf("[%d]\t%s        ", job -> jid, print_job_status(job -> status));
             }
             
+            
+            struct list_elem * e_job;
             for (e_job = list_begin(&job -> commands); e_job != list_end (&job->commands); e_job = list_next (e_job)) {
                 if (e_job == list_begin(&job -> commands)) {
                     printf("(");
@@ -82,7 +83,7 @@ void esh_command_jobs(struct esh_command_line * cmdline) {
                     printf(" | ");
                 }
             }
-            printf(" )\n");
+            printf(")\n");
         }
         else {
             #ifdef DEBUG_JOBS
@@ -110,12 +111,12 @@ print_job(struct esh_pipeline * job) {
             printf(" | ");
         }
     }
-    printf(" )\n");
+    printf(")\n");
 }
 
 const char *
 print_job_status(enum job_status status) {
-    static char * status_output[] = {"Running", "Foreground", "Stopped", "Needs Terminal", "Done"};
+    static char * status_output[] = {"Running", "Foreground", "Stopped", "Needs Terminal"};
     
     switch(status) {
         case BACKGROUND:
@@ -128,10 +129,10 @@ print_job_status(enum job_status status) {
             return status_output[2];
             break;
         case NEEDSTERMINAL:
-            return status_output[3];
+            return NULL; // status_output[3];
             break;
         case DONE:
-            return status_output[4];
+            return NULL; // status_output[4];
             break;
         default:
             return NULL;

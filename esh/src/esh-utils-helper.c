@@ -37,6 +37,7 @@ static const char rcsid [] = "$Id: esh-utils.c,v 1.5 2011/03/29 15:46:28 cs3214 
 //#define DEBUG_JOBS
 //#define DEBUG_PIPE
 //#define DEBUG_PID
+//#define DEBUG_SIGNAL 0
 
 /**
  * Assign ownership of the terminal to process group
@@ -84,26 +85,40 @@ child_status_change(pid_t child_pid, int status) {
     
     struct list_elem * list_elem_job_list;
     for (list_elem_job_list = list_begin(&jobs_list); list_elem_job_list != list_end(&jobs_list); list_elem_job_list = list_next(list_elem_job_list)) {
-        
         struct esh_pipeline * pipeline = list_entry(list_elem_job_list, struct esh_pipeline, elem);
         struct list_elem * list_elem_commands;
+        
+        pid_t comp = pipeline -> pgid;
+        bool is_multi = false;
+        if (list_size(&pipeline -> commands) > 2) {
+            is_multi = true;
+        }
         for (list_elem_commands = list_begin(&pipeline -> commands); list_elem_commands != list_end(&pipeline -> commands); list_elem_commands = list_next(list_elem_commands)) {
+            if (is_multi) {
+                struct esh_command * command = list_entry(list_elem_commands, struct esh_command, elem);
+                comp = command -> pid;
+            }
             
-            struct esh_command * command = list_entry(list_elem_commands, struct esh_command, elem);
-            if (command -> pid == child_pid) {
+            if (comp == child_pid) {
                  // Stopped by Ctrl + Z
                 if (WIFSTOPPED(status)) {
+                    #ifdef DEBUG_SIGNAL
+                        printf("Signal: Processed is interrupted and is Stopped\n");
+                    #endif
                     pipeline -> status = STOPPED;
                     esh_sys_tty_save(&pipeline -> saved_tty_state);
                     size_t size_i = 0;
                     size_t pipeline_size = list_size (&pipeline -> commands);
                     for (; size_i < pipeline_size; size_i++) {
-                        printf("[%d]\tStopped\t\t\t", pipeline -> jid);
+                        printf("[%d]  Stopped        ", pipeline -> jid);
                         print_job(pipeline);
-                    }                    
+                    }
+                    give_terminal_to(getpgrp(), terminal);                    
                 }
                 else if (WIFCONTINUED(status)) {
-                    list_remove(list_elem_commands);
+                    #ifdef DEBUG_SIGNAL
+                        printf("Signal: Processed is Continued\n");
+                    #endif
                 }
                 // KILLED by kill command [TERMINATED]
                 else if (WTERMSIG(status)) {
@@ -112,6 +127,7 @@ child_status_change(pid_t child_pid, int status) {
                     #endif
                     pipeline -> status = TERMINATED;
                     list_remove(list_elem_commands);
+                    give_terminal_to(getpgrp(), terminal);
                 }
                 // Exited normally [DONE]
                 else if (WIFEXITED(status)) {
@@ -119,9 +135,6 @@ child_status_change(pid_t child_pid, int status) {
                         printf("Signal: Process is terminated normally\n");
                     #endif
                     pipeline -> status = DONE;
-                    list_remove(list_elem_commands);
-                }
-                else {
                     list_remove(list_elem_commands);
                 }
             }
@@ -329,8 +342,8 @@ esh_command_helper(struct esh_command * cmd, struct esh_pipeline * pipeline)
     
     if (setpgid(child_pid, pipeline -> pgid) < 0) {
         esh_sys_fatal_error("Error [Parent]: Cannot set pgid\n");
-    }        
-    
+    }
+
     // --------- Foreground and Background -------- //
     if (pipeline -> bg_job) {        
         pipeline -> status = BACKGROUND;
@@ -358,22 +371,27 @@ esh_command_helper(struct esh_command * cmd, struct esh_pipeline * pipeline)
        cmd -> iored_output);
        
        int out;
-       
+       //FILE* file;
        // credit: http://www.cs.loyola.edu/~jglenn/702/S2005/Examples/dup2.html
        if (cmd -> append_to_output) {
+           // file = fopen(cmd->iored_output, "a");
+           // out = fileno(file);
            out = open(cmd -> iored_output, 
-                      O_WRONLY | O_APPEND | O_CREAT, 
+                      O_APPEND | O_CREAT | O_WRONLY, 
                       0666);
        }
        else {
+           // file = fopen(cmd->iored_output, "wb");
+           // out = fileno(file);
            out = open(cmd -> iored_output, 
-                      O_WRONLY | O_TRUNC | O_CREAT, 
+                      O_TRUNC | O_CREAT | O_WRONLY, 
                       0666);
        }
        
        if (dup2(out, STDOUT_FILENO) < 0) {                          // replace standard output with output file
             esh_sys_fatal_error("Error: dup2(out, STDOUT_FILENO)");
        }
+       //fclose(file);
        close(out);
     }
 
@@ -400,7 +418,7 @@ esh_command_helper(struct esh_command * cmd, struct esh_pipeline * pipeline)
 /* Print esh_pipeline structure to stdout */
 void
 esh_pipeline_helper(struct esh_pipeline * pipeline, struct esh_command_line * cmdline)
-{    
+{
     /* -------- PLUG_IN ---------- */
     
     esh_signal_sethandler(SIGCHLD, sigchld_handler);
@@ -455,13 +473,6 @@ esh_pipeline_helper(struct esh_pipeline * pipeline, struct esh_command_line * cm
         
         for (; e != list_end(&pipeline -> commands); e = list_next (e)) {
             struct esh_command * command = list_entry(e, struct esh_command, elem);
-            // struct esh_command * command;
-            // if (pipeline -> is_piped) {
-                // command = list_entry(e, struct esh_command, elem);
-            // }
-            // else {
-                
-            // }
             
             // while the command is not the last command in the pipe
             // continuously create a new pipe to connect from the first 
@@ -531,6 +542,11 @@ esh_pipeline_helper(struct esh_pipeline * pipeline, struct esh_command_line * cm
                 if (pipeline -> pgid == -1) {
                     pipeline -> pgid = pid;             // Child PID set to parent PID
                 }
+                
+                if (setpgid(esh_cmd -> pid, pipeline -> pgid) < 0) {
+                    esh_sys_fatal_error("Error [Parent]: Cannot set pgid\n");
+                }
+                
                 command_i++;
             }
         }

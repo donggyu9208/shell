@@ -154,11 +154,8 @@ main(int ac, char *av[])
             esh_command_line_free(cline);                                       
             continue;
         }
-        
         esh_command_line_helper(cline);
         esh_command_line_free(cline);
-        
-        
     }
     return 0;
 }
